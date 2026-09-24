@@ -3,6 +3,7 @@ const multer=require('multer');
 const fs=require('fs');
 const path=require('path');
 const crypto=require('crypto');
+const QRCode=require('qrcode');
 
 const app=express();
 app.disable('x-powered-by');
@@ -41,6 +42,15 @@ app.use(express.static(__dirname,{index:false}));
 app.get('/',(req,res)=>res.redirect('/staff.html'));
 app.post('/api/session',(req,res)=>{
  const s=token(24);sessions.set(s,{created:Date.now()});res.json({session:s});
+});
+app.get('/api/qr',async(req,res)=>{
+ const s=req.query.session;
+ if(!safeSession(s)||!sessions.has(s))return res.status(403).end();
+ try{
+   const url=`${req.protocol}://${req.get('host')}/customer.html?s=${encodeURIComponent(s)}`;
+   const png=await QRCode.toBuffer(url,{type:'png',width:440,margin:2,errorCorrectionLevel:'M'});
+   res.type('png');res.setHeader('Cache-Control','no-store');res.send(png);
+ }catch(e){res.status(500).end();}
 });
 app.post('/api/upload',upload.single('photo'),(req,res)=>{
  try{

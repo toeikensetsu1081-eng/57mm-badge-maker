@@ -49,7 +49,7 @@ details{margin-top:8px}
 summary{cursor:pointer;font-weight:700;font-size:13px}
 @media(min-width:650px){main{padding:18px}.badges{grid-template-columns:repeat(6,1fr)}}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script></head>
+</head>
 <body>
 <header>
   <h1>57mm缶バッジメーカー Ver.6 本番版</h1>
@@ -61,7 +61,7 @@ summary{cursor:pointer;font-weight:700;font-size:13px}
   <div class="step">📱 お客様のスマホ写真を受け取る</div>
   <div id="sessionState" class="note">受付QRを準備しています…</div>
   <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:10px">
-    <canvas id="qrCanvas" width="220" height="220" style="max-width:220px;background:#fff;border:1px solid #ddd;border-radius:12px"></canvas>
+    <img id="qrImage" alt="お客様受付QRコード" width="220" height="220" style="max-width:220px;background:#fff;border:1px solid #ddd;border-radius:12px;object-fit:contain">
     <div style="flex:1;min-width:210px">
       <div class="note">お客様にQRコードを読み取ってもらい、写真を1枚選んで送信してもらいます。</div>
       <div id="receiveStatus" style="font-weight:700;margin:10px 0">受信待ち…</div>
@@ -446,15 +446,11 @@ function customerUrl(){
 }
 function renderReception(){
   document.getElementById('sessionState').textContent='このQRコードはこの端末のイベント受付専用です。';
-  const c=document.getElementById('qrCanvas');
-  if(window.QRCode){
-    QRCode.toCanvas(c,customerUrl(),{width:220,margin:1},()=>{});
-  }else{
-    const x=c.getContext('2d'); x.clearRect(0,0,c.width,c.height);
-    x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.fillStyle='#222';
-    x.font='16px sans-serif';x.fillText('QR表示に通信が必要です',18,105);
-  }
+  const img=document.getElementById('qrImage');
+  img.src='/api/qr?session='+encodeURIComponent(eventSession)+'&v='+Date.now();
+  img.onerror=()=>{ document.getElementById('sessionState').textContent='QRコードを表示できません。受付リンクは利用できます。'; };
 }
+
 document.getElementById('copyLinkBtn').onclick=async()=>{
   try{await navigator.clipboard.writeText(customerUrl());alert('受付リンクをコピーしました。')}
   catch(e){prompt('このリンクをコピーしてください',customerUrl());}
