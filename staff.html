@@ -26,9 +26,7 @@ button:disabled{opacity:.45;cursor:default}
 #editorWrap.busy{opacity:.7}
 
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-#pickFile{display:none}
-.cameraPicker{position:relative;display:inline-flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer}
-.cameraPicker input[type=file]{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:100px}
+#cameraFile,#pickFile{display:none}
 #editorWrap{display:flex;justify-content:center}
 #editor{position:relative;width:min(82vw,420px);aspect-ratio:1;background:#111;border-radius:50%;overflow:hidden;touch-action:none}
 #photoCanvas{width:100%;height:100%;display:block}
@@ -77,8 +75,9 @@ summary{cursor:pointer;font-weight:700;font-size:13px}
 <section class="card">
   <div class="step">① 写真を撮る</div>
   <div class="row">
-    <label class="primary cameraPicker" id="cameraBtn">📷 カメラで撮影<input id="cameraFile" type="file" accept="image/*" capture="environment"></label>
+    <button class="primary" id="cameraBtn">📷 カメラで撮影</button>
     <button id="pickBtn">🖼️ 写真を選ぶ</button>
+    <input id="cameraFile" type="file" accept="image/*" capture="environment">
     <input id="pickFile" type="file" accept="image/*">
   </div>
   <div class="note" style="margin-top:8px">
@@ -308,6 +307,7 @@ function loadFile(f){
   img.src=url;
 }
 
+document.getElementById('cameraBtn').onclick=()=>cameraFile.click();
 document.getElementById('pickBtn').onclick=()=>pickFile.click();
 cameraFile.onchange=e=>loadFile(e.target.files[0]);
 pickFile.onchange=e=>loadFile(e.target.files[0]);
