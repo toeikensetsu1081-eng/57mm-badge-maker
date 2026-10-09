@@ -1,6 +1,6 @@
 {
   "name": "57mm-badge-event-app",
-  "version": "6.4.0",
+  "version": "6.5.0",
   "private": true,
   "scripts": {
     "start": "node server.js"

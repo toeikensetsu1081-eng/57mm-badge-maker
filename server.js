@@ -45,7 +45,7 @@ app.use(express.json({limit:'20mb'}));
 
 const BLOCKED_FILES=new Set([
  'server.js','package.json','package-lock.json','render.yaml',
- 'README.txt','README_Ver6.1.txt','README_Ver6.3.txt','.env'
+ 'README.txt','README_Ver6.1.txt','README_Ver6.3.txt','README_Ver6.4.txt','README_Ver6.5.txt','.env'
 ]);
 app.use((req,res,next)=>{
  if(req.path.startsWith('/uploads/'))return res.status(404).end();
@@ -58,10 +58,16 @@ app.use(express.static(__dirname,{index:false}));
 // Local JSON fallback is only for testing: Render Free restarts can erase it.
 const pool=process.env.DATABASE_URL?new Pool({connectionString:process.env.DATABASE_URL,ssl:process.env.PGSSL==='disable'?false:{rejectUnauthorized:false}}):null;
 const queueFile=path.join(DIR,'shared-queue.json');
+const HISTORY_MS=24*60*60*1000;
+let localHistory=[];
+const historyFile=path.join(DIR,'printed-history.json');
+try{if(!pool&&fs.existsSync(historyFile))localHistory=JSON.parse(fs.readFileSync(historyFile,'utf8'));}catch(e){localHistory=[];}
+function writeHistory(){fs.writeFileSync(historyFile+'.tmp',JSON.stringify(localHistory));fs.renameSync(historyFile+'.tmp',historyFile);}
+function pruneHistory(){const old=localHistory.length;localHistory=localHistory.filter(x=>x.printed_at>Date.now()-HISTORY_MS);if(old!==localHistory.length)writeHistory();}
 let localQueue=[];
 try{if(!pool&&fs.existsSync(queueFile))localQueue=JSON.parse(fs.readFileSync(queueFile,'utf8'));}catch(e){localQueue=[];}
 function writeLocal(){fs.writeFileSync(queueFile+'.tmp',JSON.stringify(localQueue));fs.renameSync(queueFile+'.tmp',queueFile);}
-let dbReady=pool?pool.query('CREATE TABLE IF NOT EXISTS badge_queue (id TEXT PRIMARY KEY, image TEXT NOT NULL, created_at BIGINT NOT NULL)').then(()=>true).catch(e=>{console.error('Queue database unavailable:',e);return false}):Promise.resolve(true);
+let dbReady=pool?(async()=>{try{await pool.query('CREATE TABLE IF NOT EXISTS badge_queue (id TEXT PRIMARY KEY, image TEXT NOT NULL, created_at BIGINT NOT NULL)');await pool.query('CREATE TABLE IF NOT EXISTS badge_history (id TEXT PRIMARY KEY, image TEXT NOT NULL, created_at BIGINT NOT NULL, printed_at BIGINT NOT NULL)');return true;}catch(e){console.error('Queue database unavailable:',e);return false;}})():Promise.resolve(true);
 async function queryQueue(){
  if(pool){if(!await dbReady)throw Error('database unavailable');const r=await pool.query('SELECT id,image,created_at FROM badge_queue ORDER BY created_at ASC,id ASC');return r.rows;}
  return localQueue.slice().sort((a,b)=>a.created_at-b.created_at||a.id.localeCompare(b.id));
@@ -88,10 +94,39 @@ app.post('/api/queue/printed',async(req,res)=>{
  try{
   const ids=req.body&&req.body.ids;
   if(!Array.isArray(ids)||!ids.length||ids.length>6||new Set(ids).size!==ids.length||ids.some(id=>typeof id!=='string'||!/^[A-Za-z0-9_-]{20,80}$/.test(id)))return res.status(400).json({error:'対象が不正です'});
-  if(pool){if(!await dbReady)throw Error('database unavailable');await pool.query('DELETE FROM badge_queue WHERE id=ANY($1::text[])',[ids]);}
-  else{localQueue=localQueue.filter(item=>!ids.includes(item.id));writeLocal();}
+  const now=Date.now();
+  if(pool){
+   if(!await dbReady)throw Error('database unavailable');
+   const client=await pool.connect();
+   try{await client.query('BEGIN');await client.query('INSERT INTO badge_history(id,image,created_at,printed_at) SELECT id,image,created_at,$2 FROM badge_queue WHERE id=ANY($1::text[]) ON CONFLICT(id) DO UPDATE SET printed_at=EXCLUDED.printed_at',[ids,now]);await client.query('DELETE FROM badge_queue WHERE id=ANY($1::text[])',[ids]);await client.query('COMMIT');}
+   catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+  }else{
+   const printed=localQueue.filter(item=>ids.includes(item.id)).map(x=>({...x,printed_at:now}));
+   localHistory.push(...printed);writeHistory();localQueue=localQueue.filter(item=>!ids.includes(item.id));writeLocal();pruneHistory();
+  }
   res.json({ok:true});
  }catch(e){res.status(503).json({error:'印刷済み処理に失敗しました'});}
+});
+app.get('/api/history',async(req,res)=>{
+ try{
+  let items;
+  if(pool){if(!await dbReady)throw Error('database unavailable');await pool.query('DELETE FROM badge_history WHERE printed_at<$1',[Date.now()-HISTORY_MS]);const r=await pool.query('SELECT id,image,printed_at FROM badge_history ORDER BY printed_at DESC LIMIT 100');items=r.rows;}
+  else{pruneHistory();items=localHistory.slice().sort((a,b)=>b.printed_at-a.printed_at).slice(0,100);}
+  res.json({items});
+ }catch(e){res.status(503).json({error:'履歴を取得できません'});}
+});
+app.post('/api/history/restore',async(req,res)=>{
+ try{
+  const id=req.body&&req.body.id;
+  if(typeof id!=='string'||!/^[A-Za-z0-9_-]{20,80}$/.test(id))return res.status(400).json({error:'対象が不正です'});
+  const newId=token(18),now=Date.now();let found=false;
+  if(pool){
+   if(!await dbReady)throw Error('database unavailable');
+   const r=await pool.query('INSERT INTO badge_queue(id,image,created_at) SELECT $1,image,$2 FROM badge_history WHERE id=$3 AND printed_at>$4 RETURNING id',[newId,now,id,now-HISTORY_MS]);found=!!r.rowCount;
+  }else{pruneHistory();const x=localHistory.find(x=>x.id===id);if(x){localQueue.push({id:newId,image:x.image,created_at:now});writeLocal();found=true;}}
+  if(!found)return res.status(404).json({error:'履歴が見つかりません'});
+  res.json({ok:true,id:newId});
+ }catch(e){res.status(503).json({error:'印刷待ちに戻せません'});}
 });
 
 app.get('/',(req,res)=>res.redirect('/staff.html'));

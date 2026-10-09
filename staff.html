@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>57mm缶バッジメーカー Ver.6.4 共通印刷待ち版</title>
+<title>57mm缶バッジメーカー Ver.6.5 共通印刷待ち版</title>
 <style>
 :root{--bg:#f4f6f8;--card:#fff;--text:#222;--sub:#687078;--accent:#1261a0;--ok:#16834b;--warn:#a45b00}
 *{box-sizing:border-box}
@@ -52,7 +52,7 @@ summary{cursor:pointer;font-weight:700;font-size:13px}
 </head>
 <body>
 <header>
-  <h1>57mm缶バッジメーカー Ver.6.4 共通印刷待ち版</h1>
+  <h1>57mm缶バッジメーカー Ver.6.5 共通印刷待ち版</h1>
   <p>スタッフは「撮る → 保存」だけ。グループ写真も自動調整 → 6個まとめてA4印刷</p>
 </header>
 
@@ -126,6 +126,12 @@ summary{cursor:pointer;font-weight:700;font-size:13px}
     全スタッフの写真は共通の印刷待ちに保存されます。印刷担当モードに切り替えたパソコンで印刷してください。Android／iPhone共通で、まず「PDFを開く・印刷（推奨）」を使ってください。PDFが開いたら、iPhoneは共有ボタン→「プリント」、AndroidはPDFビューアーのメニュー→「印刷」からCanon TR703Aを選択してください。印刷設定はA4・縦・倍率100%（実際のサイズ）です。直接印刷ボタンも残していますが、端末やブラウザによっては動作しない場合があります。
   </div>
 </section>
+<section class="card" id="historyCard" hidden>
+  <div class="step">④ 印刷履歴・再印刷（24時間）</div>
+  <div class="note">破れ・失敗などで再印刷したい写真を選び、「印刷待ちに戻す」を押してください。ほかのスタッフの写真と一緒に次のA4に入ります。</div>
+  <div id="historyList" class="badges" style="margin-top:12px"></div>
+  <button id="historyRefresh" style="margin-top:10px">↻ 履歴を更新</button>
+</section>
 
 <section class="card">
   <details>
@@ -155,7 +161,7 @@ const cameraFile=document.getElementById('cameraFile'), pickFile=document.getEle
 const faceInfo=document.getElementById('faceInfo'), statusEl=document.getElementById('status');
 
 function setStatus(t,cls=''){statusEl.className=cls;statusEl.textContent=t}
-function saveQueue(){} // Ver.6.4: 印刷待ちは端末に保存せずサーバーで管理
+function saveQueue(){} // Ver.6.5: 印刷待ちは端末に保存せずサーバーで管理
 async function loadQueue(){await refreshQueue();}
 async function refreshQueue(){
  try{
@@ -171,6 +177,7 @@ async function refreshQueue(){
 }
 document.getElementById('printerLoginBtn').onclick=async()=>{
  printerMode=!printerMode;
+ if(printerMode)refreshHistory();
  localStorage.setItem('badge57_printer_mode',printerMode?'yes':'no');
  printIds=[];
  await refreshQueue();
@@ -346,6 +353,7 @@ function renderQueue(){
  const isPrinter=printerMode;
  document.getElementById('printerLoginBtn').textContent=isPrinter?'📱 スタッフモードに戻す':'🖨️ 印刷担当モードに切り替える';
  document.getElementById('printedBtn').hidden=!isPrinter;
+ document.getElementById('historyCard').hidden=!isPrinter;
  document.getElementById('pdfBtn').hidden=!isPrinter;
  document.getElementById('pdfBtn').disabled=!queue.length;
  const count=window.sharedQueueCount||0;
@@ -370,13 +378,36 @@ document.getElementById('saveBtn').onclick=async()=>{
   await refreshQueue();window.scrollTo({top:0,behavior:'smooth'});
  }catch(e){alert('共通の印刷待ちに保存できませんでした。通信を確認して再試行してください。');btn.disabled=false;}
 };
+async function refreshHistory(){
+ if(!printerMode)return;
+ const wrap=document.getElementById('historyList');
+ try{
+  const r=await fetch('/api/history',{cache:'no-store'});if(!r.ok)throw Error();
+  const j=await r.json();wrap.replaceChildren();
+  if(!j.items.length){wrap.textContent='印刷履歴はありません。';return;}
+  for(const item of j.items){
+   const d=document.createElement('div');d.className='badgeThumb';
+   const im=document.createElement('img');im.src=item.image;im.alt='印刷済み写真';im.style.cssText='width:100%;height:auto;display:block;border-radius:50%';d.appendChild(im);
+   const stamp=document.createElement('div');stamp.style.fontSize='12px';stamp.textContent=new Date(Number(item.printed_at)).toLocaleString('ja-JP');d.appendChild(stamp);
+   const btn=document.createElement('button');btn.textContent='↩ 印刷待ちに戻す';
+   btn.onclick=async()=>{
+    if(!confirm('この写真1個を共通の印刷待ちの最後に追加しますか？'))return;
+    btn.disabled=true;
+    try{const r=await fetch('/api/history/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:item.id})});if(!r.ok)throw Error();await refreshQueue();alert('印刷待ちに1個追加しました。');}
+    catch(e){alert('再印刷の登録に失敗しました。');}finally{btn.disabled=false;}
+   };
+   d.appendChild(btn);wrap.appendChild(d);
+  }
+ }catch(e){wrap.textContent='履歴を取得できません。通信を確認してください。';}
+}
+document.getElementById('historyRefresh').onclick=refreshHistory;
 document.getElementById('printedBtn').onclick=async()=>{
  if(!printIds.length){alert('先に「A4を作成・印刷」から印刷してください。');return;}
  if(!confirm('実際に印刷が完了しましたか？ この'+printIds.length+'個を印刷待ちから削除します。'))return;
  try{
   const r=await fetch('/api/queue/printed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:printIds})});
   if(!r.ok)throw new Error('削除に失敗しました');
-  printIds=[];await refreshQueue();alert('印刷済みにしました。');
+  printIds=[];await refreshQueue();await refreshHistory();alert('印刷済みにしました。履歴から24時間以内は再印刷できます。');
  }catch(e){alert('印刷済みの反映に失敗しました。再試行してください。');}
 };
 
